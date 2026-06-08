@@ -143,7 +143,7 @@
   .d-name{font-size:26px;font-weight:600;line-height:1.1}
   .d-latin{font-style:italic;color:var(--ink-soft);margin-top:2px;font-size:15px}
   .d-sections{margin-top:18px;opacity:0;max-height:0;transition:opacity .7s,max-height .7s;overflow:hidden;text-align:left}
-  .revealed .d-sections{opacity:1;max-height:600px}
+  .revealed .d-sections,.locked .d-sections{opacity:1;max-height:600px}
   .d-section{margin-bottom:16px}
   .d-section-label{font-size:10px;letter-spacing:.26em;text-transform:uppercase;color:var(--ink-soft);margin-bottom:4px}
   .d-section-text{font-size:15.5px;line-height:1.6;color:var(--ink);margin:0}
@@ -403,7 +403,7 @@ const DECK = [
 ];
 /* =================== END EDIT BLOCK =================== */
 
-const KEY="eureka-fieldlog-v3";
+const KEY="eureka-fieldlog-v4";
 let found={}; try{found=JSON.parse(localStorage.getItem(KEY)||"{}")}catch(e){found={}}
 function save(){try{localStorage.setItem(KEY,JSON.stringify(found))}catch(e){}}
 function $(id){return document.getElementById(id)}
