@@ -1,0 +1,871 @@
+<!--
+  EUREKA · FIELD LOG  —  test prototype (v3: tap-to-pick map + naming)
+  --------------------------------------------------------------------
+  EXPEDITION: tap the map to drop a pin anywhere (works offline / file://),
+  name the spot yourself, begin. Optional place-search on top (needs internet
+  AND the page served over http — see note). Tiles load as images, so the map
+  shows even from file://; if there's no internet, the map is blank parchment
+  but tap-to-pick + naming still work.
+  HUNT/LOG: fully offline, no CDN needed.
+
+  SWAP: DECK array (names/rarity/fact in your Globe-Spots voice),
+        card.photo (real Eureka photos), HABITAT + EXPEDITION copy.
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>Eureka · Field Log</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css"/>
+<style>
+  :root{
+    --paper:#efe7d6;--paper-2:#e7dcc6;--ink:#23291f;--ink-soft:#5c5a47;--rule:#cdbf9f;
+    --moss:#3a5a3f;--teal:#2f6f73;--violet:#6b4a86;--gold:#a9802f;
+    --serif:"Iowan Old Style","Palatino Linotype","Palatino",Georgia,"Times New Roman",serif;
+    --mono:"Courier New",ui-monospace,monospace;
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{margin:0;height:100%}
+  body{font-family:var(--serif);color:var(--ink);background:var(--paper);
+    background-image:
+      radial-gradient(120% 90% at 50% -10%, rgba(255,250,235,.6), transparent 60%),
+      radial-gradient(140% 120% at 50% 120%, rgba(60,50,25,.10), transparent 55%);
+    -webkit-font-smoothing:antialiased;overscroll-behavior:none}
+  .wrap{max-width:560px;margin:0 auto;min-height:100%;padding:0 20px 48px;position:relative}
+  .grain{position:fixed;inset:0;pointer-events:none;opacity:.35;mix-blend-mode:multiply;
+    background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='120' height='120'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2'/></filter><rect width='100%25' height='100%25' filter='url(%23n)' opacity='.5'/></svg>")}
+
+  header{padding:26px 0 14px;text-align:center;border-bottom:1px solid var(--rule)}
+  .kicker{font-size:11px;letter-spacing:.32em;text-transform:uppercase;color:var(--ink-soft)}
+  h1{font-size:30px;margin:6px 0 2px;font-weight:600;letter-spacing:.01em}
+  .progress{margin-top:14px;font-size:12.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-soft)}
+  .bar{height:3px;background:var(--rule);border-radius:2px;margin:9px auto 0;max-width:240px;overflow:hidden}
+  .bar>i{display:block;height:100%;background:var(--moss);width:0;transition:width .6s cubic-bezier(.2,.7,.2,1)}
+
+  /* header in hunt/log mode */
+  header.in-hunt{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;text-align:left;padding:16px 0 14px}
+  header.in-hunt .header-left{flex:1;min-width:0}
+  header.in-hunt .kicker{display:none}
+  header.in-hunt h1{font-size:22px;margin:0 0 2px}
+  header.in-hunt .progress{margin-top:8px}
+  header.in-hunt .bar{margin:7px 0 0}
+  .spot-widget{flex-shrink:0;display:flex;flex-direction:column;align-items:flex-end;gap:5px}
+  .spot-minimap{width:144px;height:112px;border-radius:3px;border:1px solid var(--rule);overflow:hidden;
+    position:relative;background:var(--paper-2);box-shadow:0 1px 4px rgba(40,30,10,.12)}
+  .spot-minimap #minimap{position:absolute;inset:0;width:100%;height:100%}
+  .spot-minimap .mini-pin{position:absolute;top:50%;left:50%;
+    width:10px;height:10px;border-radius:50% 50% 50% 0;background:var(--gold);
+    transform:translate(-50%,-100%) rotate(-45deg);
+    border:1.5px solid #fbf6ea;box-shadow:0 1px 3px rgba(0,0,0,.5);z-index:500;pointer-events:none}
+  .spot-name{font-size:12px;font-family:var(--serif);color:var(--ink-soft);font-style:italic;
+    text-align:right;max-width:90px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+  .btn{display:block;width:100%;margin-top:18px;padding:16px;border:1px solid var(--ink);
+    background:transparent;color:var(--ink);font-family:var(--serif);font-size:15px;
+    letter-spacing:.18em;text-transform:uppercase;border-radius:2px;cursor:pointer;transition:.2s}
+  .btn:active{background:var(--ink);color:var(--paper)}
+
+  /* ---------- expedition ---------- */
+  .exp-head{text-align:center;margin-top:26px}
+  .exp-q{font-size:25px;font-weight:600;margin:12px 8px 14px;line-height:1.3}
+  .searchrow{display:flex;gap:8px}
+  #loc{flex:1;padding:13px 15px;border:1px solid var(--rule);background:var(--paper-2);border-radius:2px;
+    font-family:var(--serif);font-size:16px;color:var(--ink)}
+  #loc:focus{outline:none;border-color:var(--ink)}
+  #loc::placeholder{color:var(--ink-soft);font-style:italic}
+  #searchbtn{padding:0 18px;border:1px solid var(--ink);background:transparent;font-family:var(--serif);
+    font-size:12px;letter-spacing:.14em;text-transform:uppercase;border-radius:2px;cursor:pointer;color:var(--ink)}
+  #searchbtn:active{background:var(--ink);color:var(--paper)}
+  .maphint{text-align:center;font-style:italic;color:var(--ink-soft);font-size:13px;margin:13px 0 12px}
+
+  .mapframe{position:relative;height:360px;border:1px solid var(--rule);border-radius:4px;overflow:hidden;
+    box-shadow:0 2px 10px rgba(40,30,10,.12)}
+  #map{position:absolute;inset:0}
+  .leaflet-tile{filter:sepia(.55) saturate(.65) contrast(1.06) brightness(1.03)}
+  .leaflet-container{background:var(--paper-2)!important;font-family:var(--mono)}
+  .leaflet-control-attribution{background:rgba(239,231,214,.7)!important;font-size:9px;color:var(--ink-soft)!important}
+  .mapframe::after{content:"";position:absolute;inset:0;pointer-events:none;
+    box-shadow:inset 0 0 60px rgba(70,55,25,.30);background:rgba(225,210,175,.08);mix-blend-mode:multiply;z-index:450}
+  #locate{position:absolute;top:10px;right:10px;z-index:600;width:36px;height:36px;border-radius:50%;
+    background:var(--paper);border:1px solid var(--rule);display:flex;align-items:center;justify-content:center;
+    cursor:pointer;font-size:17px;color:var(--ink-soft)}
+  .pinwrap .mappin{width:18px;height:18px;border-radius:50% 50% 50% 0;background:var(--gold);
+    transform:rotate(-45deg);border:2px solid #fbf6ea;box-shadow:0 2px 6px rgba(0,0,0,.45)}
+
+  .namepanel{margin-top:18px;text-align:center}
+  #spotname{width:100%;padding:14px 16px;border:1px solid var(--rule);background:var(--paper-2);border-radius:2px;
+    font-family:var(--serif);font-size:16px;text-align:center;color:var(--ink)}
+  #spotname:focus{outline:none;border-color:var(--ink)}
+  #spotname::placeholder{color:var(--ink-soft);font-style:italic}
+  .exp-coords{font-family:var(--mono);font-size:12px;letter-spacing:.1em;color:var(--ink-soft);margin-top:10px}
+  .exp-flavor{font-size:17px;font-style:italic;margin:14px 6px 0;line-height:1.5}
+
+  /* ---------- tutorial ---------- */
+  .tut-step{display:none;padding-top:28px}
+  .tut-step.active{display:block}
+  .tut-num{font-size:11px;letter-spacing:.28em;text-transform:uppercase;color:var(--ink-soft);margin-bottom:10px}
+  .tut-title{font-size:24px;font-weight:600;line-height:1.2;margin:0 0 16px}
+  .tut-photo{width:100%;aspect-ratio:4/3;object-fit:cover;border-radius:3px;border:1px solid var(--rule);margin-bottom:18px;display:block}
+  .tut-body{font-size:17px;line-height:1.65;color:var(--ink);margin:0}
+  .tut-body em{font-style:italic;color:var(--ink-soft)}
+  .tut-nav{display:flex;justify-content:space-between;align-items:center;margin-top:32px}
+  .tut-back{font-size:12px;letter-spacing:.18em;text-transform:uppercase;color:var(--ink-soft);
+    cursor:pointer;background:none;border:none;font-family:var(--serif);padding:0}
+  .tut-back:active{color:var(--ink)}
+
+  /* ---------- deck ---------- */
+  .hint{text-align:center;font-style:italic;color:var(--ink-soft);font-size:14px;margin:22px 0 18px}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  .card{position:relative;background:var(--paper-2);border:1px solid var(--rule);border-radius:3px;
+    padding:14px 12px 12px;cursor:pointer;overflow:hidden;
+    box-shadow:0 1px 0 rgba(255,255,255,.4) inset,0 2px 6px rgba(40,30,10,.06);transition:transform .15s}
+  .card:active{transform:scale(.985)}
+  .card .seal{position:absolute;top:10px;right:10px;width:9px;height:9px;border-radius:50%}
+  .specimen{height:96px;display:flex;align-items:center;justify-content:center;margin:2px 0 8px}
+  .specimen svg{width:78px;height:78px}
+  .specimen img{width:88px;height:88px;object-fit:cover;border-radius:2px;filter:saturate(.95)}
+  .card.locked .specimen img{filter:grayscale(1) opacity(.5)}
+  .card.locked .specimen svg{opacity:.32;filter:blur(.4px)}
+  .name{font-size:15.5px;line-height:1.2;font-weight:600}
+  .card.locked .name{color:var(--ink-soft);font-style:italic;font-weight:400}
+  .rar{font-size:10px;letter-spacing:.2em;text-transform:uppercase;margin-top:3px;color:var(--ink-soft)}
+  .stamp{position:absolute;bottom:10px;right:11px;font-size:9px;letter-spacing:.18em;text-transform:uppercase;
+    color:var(--moss);border:1px solid currentColor;border-radius:2px;padding:1px 5px;transform:rotate(-6deg);opacity:.8}
+
+  /* ---------- detail ---------- */
+  .back{display:inline-block;margin:18px 0 6px;font-size:12px;letter-spacing:.18em;text-transform:uppercase;color:var(--ink-soft);cursor:pointer}
+  .plate{background:var(--paper-2);border:1px solid var(--rule);border-radius:4px;padding:26px 22px;margin-top:8px;text-align:center;position:relative;overflow:hidden}
+  .plate .specimen{height:150px}.plate .specimen svg{width:120px;height:120px}.plate .specimen img{width:150px;height:150px;object-fit:cover;border-radius:3px}
+  .plate.locked .specimen img{filter:grayscale(1) opacity(.45)}
+  .d-rar{font-size:11px;letter-spacing:.24em;text-transform:uppercase;margin-bottom:6px}
+  .d-name{font-size:26px;font-weight:600;line-height:1.1}
+  .d-latin{font-style:italic;color:var(--ink-soft);margin-top:2px;font-size:15px}
+  .d-sections{margin-top:18px;opacity:0;max-height:0;transition:opacity .7s,max-height .7s;overflow:hidden;text-align:left}
+  .revealed .d-sections{opacity:1;max-height:600px}
+  .d-section{margin-bottom:16px}
+  .d-section-label{font-size:10px;letter-spacing:.26em;text-transform:uppercase;color:var(--ink-soft);margin-bottom:4px}
+  .d-section-text{font-size:15.5px;line-height:1.6;color:var(--ink);margin:0}
+  .plate.locked .specimen svg{opacity:.3;filter:blur(.6px)}
+  .plate.revealing .specimen svg,.plate.revealing .specimen img{animation:develop 1.1s ease forwards}
+  @keyframes develop{0%{opacity:.1;filter:blur(8px) saturate(.2)}100%{opacity:1;filter:none}}
+  .shimmer{position:absolute;inset:0;pointer-events:none;opacity:0;background:linear-gradient(105deg,transparent 35%,rgba(169,128,47,.45) 50%,transparent 65%)}
+  .plate.legendary.revealing .shimmer{animation:sweep 1.3s ease forwards}
+  @keyframes sweep{0%{opacity:0;transform:translateX(-60%)}30%{opacity:1}100%{opacity:0;transform:translateX(60%)}}
+  .logged-note{margin-top:14px;font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-soft)}
+
+  .toast{position:fixed;left:50%;bottom:34px;transform:translateX(-50%) translateY(20px);background:var(--ink);color:var(--paper);
+    padding:13px 22px;border-radius:3px;font-size:14px;letter-spacing:.04em;opacity:0;transition:.4s;text-align:center;max-width:88%;z-index:9999}
+  .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+  .hide{display:none}
+  .footer{text-align:center;color:var(--ink-soft);font-size:11px;letter-spacing:.14em;text-transform:uppercase;margin-top:34px}
+
+  /* ==================== INTRO ==================== */
+  #intro{position:fixed;inset:0;z-index:5000;background:#efe7d6;overflow:hidden;cursor:pointer}
+
+  /* -- phase 1: video -- */
+  #intro-video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:block}
+  #intro-flash{position:absolute;inset:0;background:#fff;opacity:0;pointer-events:none;z-index:10}
+  #intro-caption{position:absolute;bottom:18%;left:0;right:0;text-align:center;
+    padding:0 28px;opacity:0;transition:opacity 1s ease;z-index:20}
+  #intro-caption p{color:#fff;font-family:var(--serif);font-size:clamp(15px,4vw,20px);
+    line-height:1.6;margin:0;text-shadow:0 1px 8px rgba(0,0,0,.7)}
+  #intro-caption p em{font-style:italic}
+  .intro-scalebar{position:absolute;bottom:6%;left:50%;transform:translateX(-50%);
+    display:flex;flex-direction:column;align-items:center;gap:4px;opacity:0;transition:opacity 1s ease;z-index:20}
+  .intro-scalebar .bar-line{width:calc(100vw/6);height:2px;background:#fff;position:relative}
+  .intro-scalebar .bar-line::before,.intro-scalebar .bar-line::after{
+    content:"";position:absolute;top:-3px;width:2px;height:8px;background:#fff}
+  .intro-scalebar .bar-line::before{left:0}
+  .intro-scalebar .bar-line::after{right:0}
+  .intro-scalebar .bar-label{color:#fff;font-family:var(--mono);font-size:11px;letter-spacing:.1em}
+
+  /* -- phase 2: card grid -- */
+  #intro-grid-wrap{position:absolute;inset:0;display:flex;flex-direction:column;
+    align-items:center;justify-content:center;gap:0;opacity:0;pointer-events:none;z-index:30}
+  #intro-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;
+    width:min(96vw,480px);padding:0 8px}
+  .ic{background:var(--paper-2);border:1px solid var(--rule);border-radius:3px;
+    padding:8px 6px 7px;text-align:center;opacity:0;transform:scale(.85);
+    box-shadow:0 2px 8px rgba(0,0,0,.18);transition:opacity .35s ease,transform .35s ease}
+  .ic.show{opacity:1;transform:scale(1)}
+  .ic .ic-art{height:44px;display:flex;align-items:center;justify-content:center}
+  .ic .ic-art svg{width:36px;height:36px}
+  .ic .ic-art .ic-swatch{width:36px;height:36px;border-radius:2px;opacity:.7}
+  .ic .ic-name{font-size:9.5px;font-weight:600;font-family:var(--serif);color:var(--ink);margin-top:4px;line-height:1.2}
+  .ic.mystery .ic-name{color:var(--ink-soft);font-style:italic;font-weight:400}
+  #intro-tagline{color:var(--ink);font-family:var(--serif);font-size:clamp(14px,3.8vw,18px);
+    text-align:center;padding:14px 24px 0;line-height:1.5;opacity:0;transition:opacity 1s ease;
+    width:min(96vw,480px)}
+
+  /* -- phase 3: fan + map reveal -- */
+  #intro-fan-wrap{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+    pointer-events:none;opacity:0;z-index:35}
+  .fan-card{position:absolute;width:68px;height:92px;background:var(--paper-2);
+    border:1px solid var(--rule);border-radius:4px;
+    box-shadow:0 4px 16px rgba(0,0,0,.22);
+    transform-origin:50% 130%;transition:transform .7s cubic-bezier(.4,0,.2,1),opacity .7s ease}
+  #intro-map-reveal{position:absolute;inset:0;background:var(--paper);opacity:0;
+    transition:opacity 1.2s ease;z-index:32}
+  #intro-final-text{position:absolute;bottom:14%;left:0;right:0;text-align:center;padding:0 28px;
+    opacity:0;transition:opacity 1s ease;z-index:38}
+  #intro-final-text p{font-family:var(--serif);font-size:clamp(14px,3.8vw,18px);
+    color:var(--ink);line-height:1.6;margin:0}
+  #intro-enter{position:absolute;bottom:5%;left:50%;transform:translateX(-50%);
+    border:1px solid var(--ink);background:transparent;color:var(--ink);
+    font-family:var(--serif);font-size:12px;letter-spacing:.22em;text-transform:uppercase;
+    padding:12px 28px;border-radius:2px;cursor:pointer;opacity:0;transition:opacity .8s ease;z-index:39}
+  #intro-enter:active{background:var(--ink);color:var(--paper)}
+
+  /* ---------- ink-drop transition ---------- */
+  @keyframes ink-spread{
+    0%  {clip-path:circle(0%   at 50% 65%);opacity:1}
+    100%{clip-path:circle(150% at 50% 65%);opacity:1}
+  }
+  @keyframes ink-fade{
+    0%  {opacity:1}
+    60% {opacity:.85}
+    100%{opacity:0}
+  }
+  @keyframes lbl-in{
+    0%  {opacity:0;transform:translateY(8px)}
+    100%{opacity:1;transform:translateY(0)}
+  }
+  @keyframes lbl-out{
+    0%  {opacity:1}
+    100%{opacity:0}
+  }
+  #inkdrop{position:fixed;inset:0;z-index:8000;pointer-events:none;
+    background:var(--ink);opacity:0;clip-path:circle(0% at 50% 65%);display:none}
+  #inkdrop.ink-go{animation:ink-spread .6s cubic-bezier(.4,0,.2,1) forwards}
+  #inkdrop.ink-out{animation:ink-fade 2s linear forwards}
+  .inkdrop-label{position:fixed;inset:0;z-index:8001;pointer-events:none;
+    display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;
+    opacity:0}
+  #inkdrop-label.lbl-in{animation:lbl-in .35s ease forwards}
+  #inkdrop-label.lbl-out{animation:lbl-out .5s ease forwards}
+  .inkdrop-label .idl-spot{color:var(--paper);font-family:var(--serif);font-size:22px;font-weight:600;
+    letter-spacing:.04em;text-align:center;padding:0 28px;text-shadow:0 1px 6px rgba(0,0,0,.4)}
+  .inkdrop-label .idl-sub{color:var(--gold);font-size:11px;letter-spacing:.32em;text-transform:uppercase}
+</style>
+</head>
+<body>
+
+<!-- ==================== INTRO ==================== -->
+<div id="intro">
+  <video id="intro-video" src="media/Stentors.mp4" playsinline muted preload="auto"></video>
+  <div id="intro-flash"></div>
+  <div id="intro-caption">
+    <p>A single drop of water can hold a hundred lives.<br><em>You've walked past them every day.</em></p>
+  </div>
+  <div class="intro-scalebar" id="intro-scalebar">
+    <div class="bar-line"></div>
+    <div class="bar-label">200 µm</div>
+  </div>
+
+  <!-- frame shrink overlay -->
+  <img id="frame-shrink" src="" alt="" style="position:absolute;z-index:31;border-radius:3px;object-fit:cover;display:none;pointer-events:none">
+  <canvas id="frame-canvas" style="display:none"></canvas>
+
+  <!-- phase 2: grid -->
+  <div id="intro-grid-wrap">
+    <div id="intro-grid"></div>
+    <div id="intro-tagline">Eureka lets you see them, and keep a record of what you find.</div>
+    <button id="intro-next" onclick="if(introPhase==='fan'){introPhase='done';doFan()}" style="opacity:0;transition:opacity .6s ease;margin-top:18px;padding:12px 28px;border:1px solid var(--ink);background:transparent;color:var(--ink);font-family:var(--serif);font-size:12px;letter-spacing:.22em;text-transform:uppercase;border-radius:2px;cursor:pointer">Next →</button>
+  </div>
+
+  <!-- phase 3: fan + map bg + final text -->
+  <div id="intro-map-reveal"></div>
+  <div id="intro-fan-wrap"></div>
+  <div id="intro-final-text">
+    <p>Most have never been recorded.<br>Some are waiting in the water near you.</p>
+  </div>
+  <button id="intro-enter" onclick="enterApp()">Begin →</button>
+</div>
+
+<div class="grain"></div>
+<div class="wrap">
+  <header id="siteheader">
+    <div class="header-left">
+      <div class="kicker">Eureka · Field Log</div>
+      <h1 id="h-title">Field Log</h1>
+      <div class="progress"><span id="count">0 of 0 logged</span><div class="bar"><i id="barfill"></i></div></div>
+    </div>
+    <div class="spot-widget hide" id="spot-widget">
+      <div class="spot-minimap" id="spot-minimap">
+        <div id="minimap"></div>
+        <div class="mini-pin"></div>
+      </div>
+      <div class="spot-name" id="spot-name-label"></div>
+    </div>
+  </header>
+
+  <!-- EXPEDITION -->
+  <section id="expedition">
+    <div class="exp-head">
+      <div class="kicker">Plan your expedition</div>
+      <h2 class="exp-q">Where will you explore?</h2>
+      <div class="searchrow">
+        <input id="loc" placeholder="Search a place… (optional)" autocomplete="off">
+        <button id="searchbtn" onclick="search()">Find</button>
+      </div>
+      <div class="maphint" id="maphint">…or just tap the map to drop your own spot.</div>
+    </div>
+    <div class="mapframe">
+      <div id="map"></div>
+      <div id="locate" onclick="locateMe()" title="Locate me">◎</div>
+    </div>
+    <div class="namepanel hide" id="namepanel">
+      <input id="spotname" placeholder="Name this spot — e.g. the pond behind ETH" autocomplete="off">
+      <div class="exp-coords" id="exp-coords"></div>
+      <div class="exp-flavor">Beneath this surface, a whole world is hiding.</div>
+      <button class="btn" onclick="beginHunt()">Begin the hunt ›</button>
+    </div>
+  </section>
+
+  <!-- TUTORIAL -->
+  <section id="tutorial" class="hide">
+    <div id="tut-steps"></div>
+  </section>
+
+  <!-- DECK -->
+  <section id="deck" class="hide">
+    <span class="back" onclick="go('tutorial')">‹ Back to tutorial</span>
+    <div class="hint" id="deckhint">Somewhere in this drop, all of these are waiting.</div>
+    <div class="grid" id="grid"></div>
+    <div class="footer" id="deckfoot"></div>
+  </section>
+
+  <!-- DETAIL -->
+  <section id="detail" class="hide">
+    <span class="back" onclick="go('deck')">‹ Back to log</span>
+    <div class="plate" id="plate">
+      <div class="shimmer"></div>
+      <div class="specimen" id="d-specimen"></div>
+      <div class="d-rar" id="d-rar"></div>
+      <div class="d-name" id="d-name"></div>
+      <div class="d-latin" id="d-latin"></div>
+      <div class="d-sections" id="d-sections"></div>
+      <div id="d-action"></div>
+    </div>
+  </section>
+</div>
+<div class="toast" id="toast"></div>
+<div id="inkdrop"></div>
+<div class="inkdrop-label" id="inkdrop-label">
+  <div class="idl-sub">Expedition begins</div>
+  <div class="idl-spot" id="inkdrop-spotname"></div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script>
+/* ===================== EDIT THIS ===================== */
+const HABITAT = { title:"Field Log" };
+const EXPEDITION = { flavor:"Beneath this surface, a whole world is hiding.", center:[47.3769,8.5417], zoom:12 };
+
+const RAR = {
+  common:{c:"#3a5a3f",t:"Common"}, uncommon:{c:"#2f6f73",t:"Uncommon"},
+  rare:{c:"#6b4a86",t:"Rare"}, legendary:{c:"#a9802f",t:"Legendary"},
+};
+const DECK = [
+  {id:"spirogyra",name:"Spirogyra",latin:"Spirogyra",rarity:"common",icon:"filament",photo:"media/spirogyra.jpg",
+   habitat:"Look in shallow, still ponds and ditches — especially where sunlight hits the surface. You'll often see it as a bright green mat floating near the edge.",
+   indicator:"Its presence means the water is clean enough to support plant life, but nutrient-rich. A good sign there's more life below.",
+   id_hint:"Long green threads, often tangled in clumps. Under the scope, each cell has a spiral ribbon of chloroplast running through it like a corkscrew.",
+   fact:"To reproduce, two filaments build tiny bridges between them — then one cell squeezes its whole body across the bridge to merge with the next."},
+  {id:"diatom",name:"Diatom",latin:"Bacillariophyta",rarity:"common",icon:"diatom",photo:"media/diatom.jpg",
+   habitat:"Found in almost any water with light. Scrape the brown film off a submerged rock — that's mostly diatoms.",
+   indicator:"Abundant diatoms mean good light and nutrients. Certain species only survive in clean water; others tolerate pollution. A diverse mix is a healthy sign.",
+   id_hint:"Tiny, golden-brown, and geometric. Look for pill shapes, stars, or rectangles with glassy, striated walls. They don't swim — they drift or sit still.",
+   fact:"A diatom lives inside a glass box it builds around itself, and every time it divides, one daughter gets the lid and one gets the base. The one that inherits the base is slightly smaller — and its daughter will be smaller still. Generation after generation, the cells shrink, until they hit a minimum viable size. At that point, the cell abandons its glass prison entirely, swells up to the largest size physically possible, and starts the whole cycle over."},
+  {id:"rotifer",name:"Rotifer",latin:"Rotifera",rarity:"uncommon",icon:"rotifer",photo:"media/rotifer.png",
+   habitat:"Common in pond sediment and among algae. Scoop near the bottom or squeeze water from aquatic moss.",
+   indicator:"Rotifers are a sign of a living, productive ecosystem. They're often the first animals to colonise a new body of water.",
+   id_hint:"Look for a transparent, vase-shaped body with a spinning crown of cilia at one end — like two tiny wheels. They move in short bursts and often anchor themselves to surfaces.",
+   fact:"Most rotifers have no males at all — females produce daughters from unfertilised eggs, indefinitely. But when the pond gets crowded, something shifts: a few eggs develop into males instead, sex happens once, and the resulting eggs can survive being completely dried out. In a drought, a rotifer stops moving, loses almost all its water, and enters a death-like suspension. Its DNA breaks apart, and when water returns and the cell reassembles itself, it sometimes stitches in fragments of bacterial or fungal DNA from its surroundings. It wakes up with genes it didn't have before."},
+  {id:"vorticella",name:"Vorticella",latin:"Vorticella",rarity:"rare",icon:"bell",photo:"media/Vorticella.webp",
+   habitat:"Attaches to surfaces — dead leaves, algae strands, the bottom of the petri dish. Sample near submerged solids.",
+   indicator:"Vorticella is common in organically rich water. Finding it means your sample has plenty of bacteria for it to feed on.",
+   id_hint:"A bell or wine-glass shape on a long, thin stalk. The stalk coils instantly when disturbed. Look for clusters anchored to a surface, crowns spinning to pull in food.",
+   fact:"When a Vorticella divides, the two daughters are not equal: one keeps the stalk and stays put, the other is born without one. The stalkless daughter swims off freely until it finds a spot with good water flow and plenty of bacteria. Then it stops, anchors itself, and grows a stalk. It has gone from drifter to settler in minutes. The stalk itself can coil and recoil thousands of times a second, one of the fastest cellular movements known."},
+  {id:"stentor",name:"Stentor",latin:"Stentor",rarity:"legendary",icon:"trumpet",photo:"media/stentor.png",
+   habitat:"Lurks among algae and detritus in nutrient-rich ponds. Sample near the bottom, especially where the water is slightly murky and green.",
+   indicator:"A stentor sighting means the pond has a mature, complex food web. It's near the top of the microbial food chain.",
+   id_hint:"Large enough to see as a faint blue-green speck with the naked eye. Under the scope: a trumpet shape that stretches and contracts. The whole body is covered in rows of cilia.",
+   fact:"Stentor has no brain, no neurons, no nervous system of any kind, and yet it learns. Tap it repeatedly, and it stops flinching; it has decided the disturbance isn't worth reacting to. The memory is stored not in a synapse but in a chemical tag on a protein, using almost exactly the same molecular mechanism that human neurons use to form memories. When a Stentor divides, it passes the memory to both daughters. It is a single cell that can learn, remember, and teach."},
+  {id:"mystery-1",name:"???",latin:"— unidentified —",rarity:"legendary",icon:"ciliate",photo:null,
+   habitat:"",indicator:"",id_hint:""},
+  {id:"mystery-2",name:"???",latin:"— unidentified —",rarity:"legendary",icon:"ciliate",photo:null,
+   habitat:"",indicator:"",id_hint:""},
+  {id:"mystery-3",name:"???",latin:"— unidentified —",rarity:"legendary",icon:"ciliate",photo:null,
+   habitat:"",indicator:"",id_hint:""},
+];
+/* =================== END EDIT BLOCK =================== */
+
+const KEY="eureka-fieldlog-v3";
+let found={}; try{found=JSON.parse(localStorage.getItem(KEY)||"{}")}catch(e){found={}}
+function save(){try{localStorage.setItem(KEY,JSON.stringify(found))}catch(e){}}
+function $(id){return document.getElementById(id)}
+
+/* ---------- expedition map ---------- */
+let map=null, marker=null, picked=null, spot=null;
+function initMap(){
+  if(map || typeof L==="undefined") return;
+  map=L.map("map",{zoomControl:true,attributionControl:true}).setView(EXPEDITION.center,EXPEDITION.zoom);
+  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",{maxZoom:19,attribution:"© OpenStreetMap"}).addTo(map);
+  map.on("click",e=>setPoint(e.latlng.lat,e.latlng.lng));
+  setTimeout(()=>map.invalidateSize(),150);
+}
+function setPoint(lat,lon,name){
+  picked={lat,lon};
+  const ll=[lat,lon];
+  if(!marker){
+    marker=L.marker(ll,{icon:L.divIcon({className:"pinwrap",html:'<div class="mappin"></div>',iconSize:[18,18],iconAnchor:[9,18]})}).addTo(map);
+  } else { marker.setLatLng(ll); }
+  $("namepanel").classList.remove("hide");
+  $("exp-coords").textContent=lat.toFixed(4)+"°,  "+lon.toFixed(4)+"°";
+  if(name){ $("spotname").value=name; }
+  initMiniMap(lat,lon);
+}
+function search(){
+  const q=$("loc").value.trim(); if(!q) return;
+  $("maphint").textContent="Searching…";
+  geocode(q).then(hit=>{
+    if(hit){
+      if(map) map.flyTo([hit.lat,hit.lon],14,{duration:1.8});
+      setTimeout(()=>setPoint(hit.lat,hit.lon,prettyName(hit.name)),300);
+      $("maphint").textContent="…or tap the map to move the pin.";
+    } else {
+      $("maphint").textContent="Couldn't find that — tap the map to drop your own pin.";
+    }
+  }).catch(()=>{ $("maphint").textContent="Search needs internet — tap the map to drop your own pin."; });
+}
+function geocode(q){
+  const ctrl=new AbortController(); const t=setTimeout(()=>ctrl.abort(),6000);
+  const url="https://nominatim.openstreetmap.org/search?format=json&limit=1&q="+encodeURIComponent(q);
+  return fetch(url,{signal:ctrl.signal,headers:{"Accept":"application/json"}})
+    .then(r=>r.json()).then(j=>{clearTimeout(t); return (j&&j[0])?{lat:+j[0].lat,lon:+j[0].lon,name:j[0].display_name}:null;});
+}
+function locateMe(){
+  if(!navigator.geolocation){ toast("Location not available — search or tap the map."); return; }
+  navigator.geolocation.getCurrentPosition(
+    p=>{ if(map) map.flyTo([p.coords.latitude,p.coords.longitude],14,{duration:1.6}); },
+    ()=>toast("Couldn't locate you — search or tap the map."),
+    {timeout:6000});
+}
+function prettyName(s){ return (s||"").split(",")[0] || "Your spot"; }
+function beginHunt(){
+  if(!picked){ toast("Tap the map to choose your spot first."); return; }
+  const nm=$("spotname").value.trim() || "Your spot";
+  spot={name:nm,lat:picked.lat,lon:picked.lon};
+  $("deckhint").textContent="At "+nm+", all of these may be waiting.";
+  $("inkdrop-spotname").textContent=nm;
+
+  const drop=$("inkdrop"), lbl=$("inkdrop-label");
+  drop.className=""; lbl.className="inkdrop-label";
+  drop.style.display="block";
+
+  // spread ink
+  drop.classList.add("ink-go");
+
+  // label appears once ink covers screen
+  setTimeout(()=>lbl.classList.add("lbl-in"), 520);
+
+  // label fades out before deck swap
+  setTimeout(()=>{ lbl.classList.remove("lbl-in"); lbl.classList.add("lbl-out"); }, 1800);
+
+  // swap to deck, fade ink out
+  setTimeout(()=>{
+    go("tutorial");
+    // stop the forwards-frozen animation, lock opacity at 1, then transition to 0
+    drop.style.animation="none";
+    drop.style.opacity="1";
+    drop.style.clipPath="circle(150% at 50% 65%)";
+    // force a reflow so the browser registers the opacity:1 before we start fading
+    drop.getBoundingClientRect();
+    drop.style.transition="opacity 2s linear";
+    drop.style.opacity="0";
+    drop.addEventListener("transitionend", ()=>{
+      drop.style.display="none";
+      drop.style.cssText="";
+      drop.className=""; lbl.className="inkdrop-label";
+    }, {once:true});
+  }, 2100);
+}
+
+/* ---------- specimen line-art ---------- */
+function svg(icon){
+  const s='stroke="#23291f" stroke-width="2.4" fill="none" stroke-linecap="round" stroke-linejoin="round"';
+  const f='fill="#3a5a3f" opacity=".18"';
+  const M={
+    ciliate:`<ellipse cx="40" cy="40" rx="26" ry="17" ${f}/><ellipse cx="40" cy="40" rx="26" ry="17" ${s}/>${[...Array(12)].map((_,i)=>{const a=i/12*6.28,x=40+Math.cos(a)*30,y=40+Math.sin(a)*20;return `<line x1="${40+Math.cos(a)*26}" y1="${40+Math.sin(a)*17}" x2="${x}" y2="${y}" ${s}/>`}).join('')}`,
+    rotifer:`<path d="M30 16 Q40 8 50 16 L48 56 Q40 70 32 56 Z" ${f}/><path d="M30 16 Q40 8 50 16 L48 56 Q40 70 32 56 Z" ${s}/><circle cx="34" cy="18" r="5" ${s}/><circle cx="46" cy="18" r="5" ${s}/>`,
+    crustacean:`<path d="M22 38 Q34 16 56 26 Q66 40 52 58 Q32 64 22 50 Z" ${f}/><path d="M22 38 Q34 16 56 26 Q66 40 52 58 Q32 64 22 50 Z" ${s}/><circle cx="34" cy="34" r="4" fill="#23291f"/><path d="M22 38 Q10 30 8 20" ${s}/><path d="M22 44 Q12 46 8 56" ${s}/>`,
+    flagellate:`<ellipse cx="38" cy="42" rx="15" ry="24" ${f}/><ellipse cx="38" cy="42" rx="15" ry="24" ${s}/><path d="M38 18 Q54 6 62 16 Q56 24 50 22" ${s}/><circle cx="38" cy="50" r="4" fill="#3a5a3f"/>`,
+    filament:`<path d="M16 20 Q40 14 64 20 M16 40 Q40 34 64 40 M16 60 Q40 54 64 60" ${s}/><path d="M28 14 Q34 40 28 66 M52 14 Q46 40 52 66" stroke="#3a5a3f" stroke-width="2" fill="none"/>`,
+    colony:`<circle cx="40" cy="40" r="28" ${f}/><circle cx="40" cy="40" r="28" ${s}/>${[...Array(7)].map(()=>`<circle cx="${24+Math.random()*32}" cy="${24+Math.random()*32}" r="4" stroke="#3a5a3f" stroke-width="1.6" fill="none"/>`).join('')}`,
+    bell:`<path d="M28 18 Q40 12 52 18 L48 40 Q40 48 32 40 Z" ${f}/><path d="M28 18 Q40 12 52 18 L48 40 Q40 48 32 40 Z" ${s}/><path d="M40 48 q-6 8 0 16 q6 8 0 16" ${s}/>`,
+    trumpet:`<path d="M24 16 Q40 10 56 16 L46 58 Q40 66 34 58 Z" ${f}/><path d="M24 16 Q40 10 56 16 L46 58 Q40 66 34 58 Z" ${s}/>${[...Array(8)].map((_,i)=>`<line x1="${26+i*4}" y1="14" x2="${26+i*4}" y2="6" ${s}/>`).join('')}`,
+    polyp:`<path d="M34 30 L34 64 Q40 70 46 64 L46 30 Z" ${f}/><path d="M34 30 L34 64 Q40 70 46 64 L46 30 Z" ${s}/><path d="M34 30 Q26 14 22 8 M40 30 V8 M46 30 Q54 14 58 8 M30 30 Q26 18 18 16 M50 30 Q54 18 62 16" ${s}/>`,
+    tardigrade:`<path d="M18 40 Q24 22 48 24 Q66 28 62 42 Q66 56 48 58 Q24 60 18 42 Z" ${f}/><path d="M18 40 Q24 22 48 24 Q66 28 62 42 Q66 56 48 58 Q24 60 18 42 Z" ${s}/><circle cx="58" cy="36" r="2.6" fill="#23291f"/><path d="M26 56 v10 M36 58 v10 M46 58 v10 M56 56 v9" ${s}/>`,
+    diatom:`<ellipse cx="40" cy="40" rx="22" ry="22" ${f}/><ellipse cx="40" cy="40" rx="22" ry="22" ${s}/><ellipse cx="40" cy="40" rx="14" ry="14" ${s}/>${[...Array(12)].map((_,i)=>{const a=i/12*6.28;return `<line x1="${40+Math.cos(a)*14}" y1="${40+Math.sin(a)*14}" x2="${40+Math.cos(a)*22}" y2="${40+Math.sin(a)*22}" ${s}/>`}).join('')}<circle cx="40" cy="40" r="3" fill="#2f6f73" opacity=".5"/>`,
+    lacrymaria:`<path d="M38 68 Q36 56 30 44 Q22 30 28 20 Q34 10 40 10 Q46 10 52 20 Q58 30 50 44 Q44 56 42 68 Z" ${f}/><path d="M38 68 Q36 56 30 44 Q22 30 28 20 Q34 10 40 10 Q46 10 52 20 Q58 30 50 44 Q44 56 42 68 Z" ${s}/><circle cx="40" cy="10" r="5" ${s}/><path d="M36 68 Q40 72 44 68" ${s}/>`,
+  };
+  return `<svg viewBox="0 0 80 80">${M[icon]||M.ciliate}</svg>`;
+}
+function media(c,locked){ if(c.photo) return `<img src="${c.photo}" alt="">`; return svg(c.icon); }
+
+/* ---------- minimap ---------- */
+let miniMap=null;
+function initMiniMap(lat,lon){
+  if(typeof L==="undefined") return;
+  if(!miniMap){
+    miniMap=L.map("minimap",{
+      zoomControl:false,attributionControl:false,
+      dragging:false,touchZoom:false,scrollWheelZoom:false,
+      doubleClickZoom:false,boxZoom:false,keyboard:false,tap:false
+    }).setView([lat,lon],14);
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",{maxZoom:19}).addTo(miniMap);
+  } else {
+    miniMap.setView([lat,lon],14,{animate:false});
+  }
+  setTimeout(()=>miniMap.invalidateSize(),50);
+}
+
+/* ---------- views ---------- */
+let current=null;
+function go(view){
+  ["expedition","tutorial","deck","detail"].forEach(v=>$(v).classList.toggle("hide",v!==view));
+  if(view==="expedition"){ initMap(); setTimeout(()=>{ if(map) map.invalidateSize(); },150); }
+  if(view==="tutorial"){ tutIdx=0; renderTutorial(); }
+  if(view==="deck"){ renderGrid(); }
+  const inHunt=(view==="deck"||view==="detail");
+  $("siteheader").classList.toggle("in-hunt", inHunt);
+  $("spot-widget").classList.toggle("hide", !inHunt);
+  if(inHunt && spot){ $("spot-name-label").textContent=spot.name; }
+  window.scrollTo(0,0);
+}
+function updateProgress(){
+  const real=DECK.filter(c=>c.name!=="???");
+  const n=real.filter(c=>found[c.id]).length,t=real.length;
+  $("count").textContent=`${n} of ${t} logged`; $("barfill").style.width=(n/t*100)+"%";
+  $("deckfoot").textContent=n===t?"Log complete — every resident found.":`${t-n} still hiding`;
+}
+function renderGrid(){
+  $("grid").innerHTML=DECK.map(c=>{const locked=!found[c.id];const r=RAR[c.rarity];const mystery=c.name==="???";
+    return `<div class="card ${locked?'locked':''}" ${mystery?'':'onclick="open_(\''+c.id+'\')"'} style="${mystery?'cursor:default':''}">
+      <span class="seal" style="background:${r.c}"></span>
+      <div class="specimen">${media(c,locked)}</div>
+      <div class="name">${locked?'? ? ?':c.name}</div>
+      <div class="rar" style="color:${r.c}">${r.t}</div>
+      ${locked?'':'<span class="stamp" style="color:'+r.c+'">Logged</span>'}</div>`;}).join("");
+  updateProgress();
+}
+function open_(id){
+  const c=DECK.find(x=>x.id===id);current=c;const locked=!found[c.id];const r=RAR[c.rarity];
+  const plate=$("plate"); plate.className="plate "+(locked?"locked ":"revealed ")+c.rarity;
+  $("d-specimen").innerHTML=media(c,locked);
+  $("d-rar").textContent=r.t; $("d-rar").style.color=r.c;
+  $("d-name").textContent=locked?"Unidentified":c.name;
+  $("d-latin").textContent=locked?"— find it under the scope —":c.latin;
+  $("d-sections").innerHTML=locked
+    ? `<div class="d-section"><div class="d-section-label">Where to look</div><p class="d-section-text">${c.habitat}</p></div>
+       <div class="d-section"><div class="d-section-label">What it tells you</div><p class="d-section-text">${c.indicator}</p></div>
+       <div class="d-section"><div class="d-section-label">How to identify it</div><p class="d-section-text">${c.id_hint}</p></div>`
+    : `<div class="d-section"><div class="d-section-label">Field note</div><p class="d-section-text">${c.fact}</p></div>`;
+  $("d-action").innerHTML=locked?`<button class="btn" onclick="logIt()">I found it — log it</button>`:`<div class="logged-note">✓ Logged</div>`;
+  go("detail");
+}
+function logIt(){
+  const c=current; found[c.id]=Date.now(); save();
+  const plate=$("plate"); plate.classList.remove("locked"); plate.classList.add("revealing","revealed");
+  $("d-specimen").innerHTML=media(c,false); $("d-name").textContent=c.name; $("d-latin").textContent=c.latin;
+  $("d-sections").innerHTML=`<div class="d-section"><div class="d-section-label">Field note</div><p class="d-section-text">${c.fact}</p></div>`;
+  $("d-action").innerHTML=`<div class="logged-note">✓ Logged just now</div>`;
+  const r=RAR[c.rarity], big=(c.rarity==="rare"||c.rarity==="legendary");
+  toast(big?`★ ${r.t} find — ${c.name}!`:`${c.name} added to your log`);
+  updateProgress(); setTimeout(()=>plate.classList.remove("revealing"),1400);
+}
+let tT;
+function toast(m){const el=$("toast");el.textContent=m;el.classList.add("show");clearTimeout(tT);tT=setTimeout(()=>el.classList.remove("show"),2600);}
+
+$("h-title").textContent=HABITAT.title;
+$("loc").addEventListener("keydown",e=>{if(e.key==="Enter")search();});
+document.querySelector(".exp-flavor").textContent=EXPEDITION.flavor;
+initMap();
+updateProgress();
+
+/* ==================== TUTORIAL ==================== */
+const TUT_STEPS=[
+  {
+    title:"Read the water",
+    body:"Still water holds more life than moving water. Green, murky, stagnant = promising. <em>Clear water is usually empty.</em>",
+    photo:"media/step1.jpg"
+  },
+  {
+    title:"Bring the scope online",
+    body:"Press the button and turn the knob until the light comes on. Join the WiFi <em>\"Eureka Black\"</em> (eureka6688), then open <em>eureka1.local:5000</em>.",
+    photo:"media/step2.png?v=2"
+  },
+  {
+    title:"Take a piece of the bottom",
+    body:"The interesting things cling to surfaces, not open water. Stir up the sediment and scoop it together with some solids — sludge, a dead leaf, algae, the green film off a rock. <em>Squeamish? Pipette from right beside those solids.</em> A clean, clear sample is usually a boring one.",
+    photo:"media/step3.png"
+  },
+  {
+    title:"Mount it",
+    body:"Drop the sample into the petri dish and set the dish on the stage.",
+    photo:"media/step4.png"
+  },
+];
+
+let tutIdx=0;
+function renderTutorial(){
+  $("tut-steps").innerHTML=TUT_STEPS.map((s,i)=>`
+    <div class="tut-step${i===tutIdx?' active':''}" id="tut-${i}">
+      <div class="tut-num">Step ${i+1} of ${TUT_STEPS.length}</div>
+      <h2 class="tut-title">${s.title}</h2>
+      ${s.photo?`<img src="${s.photo}" class="tut-photo" alt="">`:''}
+      <p class="tut-body">${s.body}</p>
+      <div class="tut-nav">
+        <button class="tut-back" onclick="tutBack()">${i===0?'‹ Back to map':'‹ Back'}</button>
+        ${i<TUT_STEPS.length-1
+          ? `<button class="btn" style="margin-top:0;width:auto;padding:14px 28px" onclick="tutNext()">Next ›</button>`
+          : `<button class="btn" style="margin-top:0;width:auto;padding:14px 28px" onclick="go('deck')">Open field log ›</button>`}
+      </div>
+    </div>`).join("");
+}
+function tutNext(){
+  document.getElementById("tut-"+tutIdx).classList.remove("active");
+  tutIdx=Math.min(tutIdx+1, TUT_STEPS.length-1);
+  document.getElementById("tut-"+tutIdx).classList.add("active");
+  window.scrollTo(0,0);
+}
+function tutBack(){
+  if(tutIdx===0){ go("expedition"); return; }
+  document.getElementById("tut-"+tutIdx).classList.remove("active");
+  tutIdx--;
+  document.getElementById("tut-"+tutIdx).classList.add("active");
+  window.scrollTo(0,0);
+}
+
+/* ==================== INTRO SEQUENCE ==================== */
+const INTRO_CARDS=[
+  {name:"Spirogyra",    icon:"filament", color:"#3a5a3f", photo:"media/spirogyra.jpg"},
+  {name:"Diatom",       icon:"diatom",   color:"#2f6f73", photo:"media/diatom.jpg"},
+  {name:"Rotifer",      icon:"rotifer",  color:"#3a5a3f", photo:"media/rotifer.png"},
+  {name:"Vorticella",   icon:"bell",     color:"#2f6f73", photo:"media/Vorticella.webp"},
+  {name:"Stentor",      icon:"trumpet",  color:"#6b4a86", photo:"media/stentor.png"},
+  {name:"???",          icon:null,       color:"#a9802f", photo:null},
+  {name:"???",          icon:null,       color:"#a9802f", photo:null},
+  {name:"???",          icon:null,       color:"#a9802f", photo:null},
+];
+
+function buildIntroGrid(){
+  const grid=$("intro-grid");
+  grid.innerHTML=INTRO_CARDS.map((c,i)=>{
+    const mystery=c.name==="???";
+    const art=mystery
+      ? `<div class="ic-swatch" style="background:${c.color}20;border:1px dashed ${c.color}88"></div>`
+      : c.photo
+        ? `<img src="${c.photo}" style="width:44px;height:44px;object-fit:cover;border-radius:2px">`
+        : `<svg viewBox="0 0 80 80">${svgPaths(c.icon,c.color)}</svg>`;
+    return `<div class="ic${mystery?' mystery':''}" id="ic-${i}">
+      <div class="ic-art">${art}</div>
+      <div class="ic-name">${mystery?'? ? ?':c.name}</div>
+    </div>`;
+  }).join("");
+}
+
+function svgPaths(icon, col){
+  // reuse the svg() inner paths but with intro colour tint
+  const s=`stroke="${col}" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"`;
+  const f=`fill="${col}" opacity=".15"`;
+  const M={
+    ciliate:`<ellipse cx="40" cy="40" rx="26" ry="17" ${f}/><ellipse cx="40" cy="40" rx="26" ry="17" ${s}/>${[...Array(8)].map((_,i)=>{const a=i/8*6.28,x=40+Math.cos(a)*30,y=40+Math.sin(a)*21;return `<line x1="${40+Math.cos(a)*26}" y1="${40+Math.sin(a)*17}" x2="${x}" y2="${y}" ${s}/>`}).join('')}`,
+    rotifer:`<path d="M30 16 Q40 8 50 16 L48 56 Q40 70 32 56 Z" ${f}/><path d="M30 16 Q40 8 50 16 L48 56 Q40 70 32 56 Z" ${s}/><circle cx="34" cy="18" r="5" ${s}/><circle cx="46" cy="18" r="5" ${s}/>`,
+    crustacean:`<path d="M22 38 Q34 16 56 26 Q66 40 52 58 Q32 64 22 50 Z" ${f}/><path d="M22 38 Q34 16 56 26 Q66 40 52 58 Q32 64 22 50 Z" ${s}/>`,
+    filament:`<path d="M16 20 Q40 14 64 20 M16 40 Q40 34 64 40 M16 60 Q40 54 64 60" ${s}/>`,
+    bell:`<path d="M28 18 Q40 12 52 18 L48 40 Q40 48 32 40 Z" ${f}/><path d="M28 18 Q40 12 52 18 L48 40 Q40 48 32 40 Z" ${s}/><path d="M40 48 q-6 8 0 16" ${s}/>`,
+    trumpet:`<path d="M24 16 Q40 10 56 16 L46 58 Q40 66 34 58 Z" ${f}/><path d="M24 16 Q40 10 56 16 L46 58 Q40 66 34 58 Z" ${s}/>`,
+  };
+  return M[icon]||M.ciliate;
+}
+
+let introPhase="video";
+$("intro").addEventListener("click", ()=>{
+  if(introPhase==="fan"){ introPhase="done"; doFan(); }
+});
+
+function runIntro(){
+  const vid=$("intro-video");
+  buildIntroGrid();
+
+  // phase 1 — play video, show caption + scalebar
+  vid.play().catch(()=>{});
+  setTimeout(()=>{
+    $("intro-caption").style.opacity="1";
+    $("intro-scalebar").style.opacity="1";
+  }, 600);
+
+  // pause mid-video and flash
+  const pauseAt=vid.duration>0 ? vid.duration*0.45 : 2.2;
+  function checkPause(){
+    if(vid.currentTime >= pauseAt){ vid.pause(); doFlashAndGrid(); }
+    else requestAnimationFrame(checkPause);
+  }
+  vid.addEventListener("loadedmetadata",()=>{
+    vid.currentTime=0; vid.play().catch(()=>{});
+    requestAnimationFrame(checkPause);
+  },{once:true});
+  // fallback if metadata already loaded
+  if(vid.readyState>=1) { vid.play().catch(()=>{}); requestAnimationFrame(checkPause); }
+}
+
+const STENTOR_IDX=4; // index in INTRO_CARDS
+
+function doFlashAndGrid(){
+  const vid=$("intro-video");
+
+  // capture current frame to canvas → dataURL
+  const canvas=$("frame-canvas");
+  canvas.width=vid.videoWidth||window.innerWidth;
+  canvas.height=vid.videoHeight||window.innerHeight;
+  canvas.getContext("2d").drawImage(vid,0,0,canvas.width,canvas.height);
+  const frameURL=canvas.toDataURL("image/jpeg",0.85);
+
+  // white flash
+  const flash=$("intro-flash");
+  flash.style.transition="opacity .08s ease";
+  flash.style.opacity="1";
+  setTimeout(()=>{ flash.style.transition="opacity .6s ease"; flash.style.opacity="0"; }, 120);
+
+  // fade caption & scalebar
+  $("intro-caption").style.opacity="0";
+  $("intro-scalebar").style.opacity="0";
+
+  // show grid (all hidden initially) so we can measure stentor card position
+  const gw=$("intro-grid-wrap");
+  gw.style.opacity="1";
+  gw.style.pointerEvents="none";
+
+  // set up the shrinking frame image — starts fullscreen
+  const img=$("frame-shrink");
+  img.src=frameURL;
+  img.style.display="block";
+  img.style.transition="none";
+  img.style.left="0"; img.style.top="0";
+  img.style.width="100%"; img.style.height="100%";
+  img.style.borderRadius="0";
+
+  // fade video out → dark background while frame-shrink takes over
+  vid.style.transition="opacity .4s ease";
+  vid.style.opacity="0";
+
+  // after one frame, measure stentor card and animate shrink
+  requestAnimationFrame(()=>requestAnimationFrame(()=>{
+    const stCard=document.getElementById("ic-"+STENTOR_IDX);
+    const r=stCard.getBoundingClientRect();
+    const iR=$("intro").getBoundingClientRect();
+    const tx=r.left-iR.left, ty=r.top-iR.top;
+    const sw=r.width, sh=r.height;
+
+    img.style.transition="left .75s cubic-bezier(.4,0,.2,1), top .75s cubic-bezier(.4,0,.2,1), width .75s cubic-bezier(.4,0,.2,1), height .75s cubic-bezier(.4,0,.2,1), border-radius .5s ease";
+    img.style.left=tx+"px"; img.style.top=ty+"px";
+    img.style.width=sw+"px"; img.style.height=sh+"px";
+    img.style.borderRadius="3px";
+
+    // once shrink lands, swap frame into stentor card art, show card, cascade rest
+    setTimeout(()=>{
+      img.style.display="none";
+
+      // reveal stentor card with its real photo
+      const stEl=document.getElementById("ic-"+STENTOR_IDX);
+      stEl.classList.add("show");
+
+      // cascade all other cards skipping stentor
+      let delay=120;
+      INTRO_CARDS.forEach((_,i)=>{
+        if(i===STENTOR_IDX) return;
+        setTimeout(()=>{
+          const el=document.getElementById("ic-"+i);
+          if(el) el.classList.add("show");
+        }, delay);
+        delay+=80;
+      });
+
+      // tagline + next button
+      setTimeout(()=>{ $("intro-tagline").style.opacity="1"; }, delay+400);
+      setTimeout(()=>{ introPhase="fan"; $("intro-next").style.opacity="1"; }, delay+1600);
+    }, 750);
+  }));
+}
+
+function doFan(){
+  const gw=$("intro-grid-wrap");
+  gw.style.opacity="0"; gw.style.pointerEvents="none";
+
+  const fanWrap=$("intro-fan-wrap");
+  fanWrap.innerHTML="";
+  fanWrap.style.opacity="1";
+  fanWrap.style.pointerEvents="auto";
+
+  const N=INTRO_CARDS.length, spread=44;
+  const cards=[];
+  for(let i=0;i<N;i++){
+    const c=INTRO_CARDS[i];
+    const mystery=c.name==="???";
+    const div=document.createElement("div");
+    div.className="fan-card";
+    div.style.display="flex";
+    div.style.flexDirection="column";
+    div.style.alignItems="center";
+    div.style.justifyContent="center";
+    div.style.gap="4px";
+    div.style.padding="5px";
+    div.style.overflow="hidden";
+    if(mystery){
+      div.innerHTML=`<div style="width:56px;height:56px;border-radius:2px;border:1px dashed ${c.color}88;background:${c.color}20;display:flex;align-items:center;justify-content:center;font-family:var(--serif);font-size:14px;color:${c.color}">?</div><div style="font-family:var(--serif);font-size:8px;color:var(--ink-soft);font-style:italic;text-align:center">? ? ?</div>`;
+    } else if(c.photo){
+      div.innerHTML=`<img src="${c.photo}" style="width:56px;height:56px;object-fit:cover;border-radius:2px"><div style="font-family:var(--serif);font-size:8px;font-weight:600;color:var(--ink);letter-spacing:.04em;text-align:center;line-height:1.2">${c.name}</div>`;
+    } else {
+      div.innerHTML=`<svg viewBox="0 0 80 80" style="width:44px;height:44px">${svgPaths(c.icon,c.color)}</svg><div style="font-family:var(--serif);font-size:8px;font-weight:600;color:var(--ink);letter-spacing:.04em;text-align:center;line-height:1.2">${c.name}</div>`;
+    }
+    div.style.transition="none";
+    div.style.transform="rotate(0deg) translateY(60px)";
+    div.style.opacity="0";
+    fanWrap.appendChild(div);
+    cards.push({el:div, angle: -spread/2 + (i/(N-1))*spread});
+  }
+
+  // force reflow so initial state is committed, then animate each card
+  fanWrap.getBoundingClientRect();
+  cards.forEach(({el, angle}, i)=>{
+    setTimeout(()=>{
+      el.style.transition="transform .65s cubic-bezier(.2,.8,.3,1), opacity .4s ease";
+      el.style.opacity="1";
+      el.style.transform=`rotate(${angle}deg) translateY(0px)`;
+    }, i*45);
+  });
+
+  // map fades in behind fan
+  setTimeout(()=>{ $("intro-map-reveal").style.opacity="1"; }, 400);
+
+  // final text
+  setTimeout(()=>{ $("intro-final-text").style.opacity="1"; }, 1000);
+
+  // enter button
+  setTimeout(()=>{ $("intro-enter").style.opacity="1"; }, 2000);
+}
+
+function enterApp(){
+  $("intro").style.transition="opacity .6s ease";
+  $("intro").style.opacity="0";
+  setTimeout(()=>{ $("intro").style.display="none"; }, 650);
+}
+
+runIntro();
+</script>
+</body>
+</html>
