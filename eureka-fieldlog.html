@@ -331,7 +331,10 @@
 
   <!-- DECK -->
   <section id="deck" class="hide">
-    <span class="back" onclick="go('tutorial')">‹ Back to tutorial</span>
+    <div style="display:flex;justify-content:space-between;align-items:center">
+      <span class="back" onclick="go('tutorial')">‹ Back to tutorial</span>
+      <span class="back" onclick="restartLog()" style="color:var(--ink-soft)">Restart ↺</span>
+    </div>
     <div class="hint" id="deckhint">Somewhere in this drop, all of these are waiting.</div>
     <div class="grid" id="grid"></div>
     <div class="footer" id="deckfoot"></div>
@@ -375,23 +378,23 @@ const DECK = [
    id_hint:"Long green threads, often tangled in clumps. Under the scope, each cell has a spiral ribbon of chloroplast running through it like a corkscrew.",
    fact:"To reproduce, two filaments build tiny bridges between them — then one cell squeezes its whole body across the bridge to merge with the next."},
   {id:"diatom",name:"Diatom",latin:"Bacillariophyta",rarity:"common",icon:"diatom",photo:"media/diatom.jpg",
-   habitat:"Found in almost any water with light. Scrape the brown film off a submerged rock — that's mostly diatoms.",
-   indicator:"Abundant diatoms mean good light and nutrients. Certain species only survive in clean water; others tolerate pollution. A diverse mix is a healthy sign.",
-   id_hint:"Tiny, golden-brown, and geometric. Look for pill shapes, stars, or rectangles with glassy, striated walls. They don't swim — they drift or sit still.",
+   habitat:"Found in almost any water with light. Scrape the brown film off a submerged rock — that's mostly them.",
+   indicator:"Abundance of them means good light and nutrients. Certain species only survive in clean water; others tolerate pollution. A diverse mix is a healthy sign.",
+   id_hint:"Tiny, golden-brown, and geometric. Look for pill shapes with striated walls. They don't swim — they drift or sit still.",
    fact:"A diatom lives inside a glass box it builds around itself, and every time it divides, one daughter gets the lid and one gets the base. The one that inherits the base is slightly smaller — and its daughter will be smaller still. Generation after generation, the cells shrink, until they hit a minimum viable size. At that point, the cell abandons its glass prison entirely, swells up to the largest size physically possible, and starts the whole cycle over."},
   {id:"rotifer",name:"Rotifer",latin:"Rotifera",rarity:"uncommon",icon:"rotifer",photo:"media/rotifer.png",
    habitat:"Common in pond sediment and among algae. Scoop near the bottom or squeeze water from aquatic moss.",
-   indicator:"Rotifers are a sign of a living, productive ecosystem. They're often the first animals to colonise a new body of water.",
+   indicator:"They are a sign of a living, productive ecosystem. They're often the first animals to colonise a new body of water.",
    id_hint:"Look for a transparent, vase-shaped body with a spinning crown of cilia at one end — like two tiny wheels. They move in short bursts and often anchor themselves to surfaces.",
    fact:"Most rotifers have no males at all — females produce daughters from unfertilised eggs, indefinitely. But when the pond gets crowded, something shifts: a few eggs develop into males instead, sex happens once, and the resulting eggs can survive being completely dried out. In a drought, a rotifer stops moving, loses almost all its water, and enters a death-like suspension. Its DNA breaks apart, and when water returns and the cell reassembles itself, it sometimes stitches in fragments of bacterial or fungal DNA from its surroundings. It wakes up with genes it didn't have before."},
   {id:"vorticella",name:"Vorticella",latin:"Vorticella",rarity:"rare",icon:"bell",photo:"media/Vorticella.webp",
    habitat:"Attaches to surfaces — dead leaves, algae strands, the bottom of the petri dish. Sample near submerged solids.",
-   indicator:"Vorticella is common in organically rich water. Finding it means your sample has plenty of bacteria for it to feed on.",
+   indicator:"They are common in organically rich water. Finding it means your sample has plenty of bacteria for it to feed on.",
    id_hint:"A bell or wine-glass shape on a long, thin stalk. The stalk coils instantly when disturbed. Look for clusters anchored to a surface, crowns spinning to pull in food.",
    fact:"When a Vorticella divides, the two daughters are not equal: one keeps the stalk and stays put, the other is born without one. The stalkless daughter swims off freely until it finds a spot with good water flow and plenty of bacteria. Then it stops, anchors itself, and grows a stalk. It has gone from drifter to settler in minutes. The stalk itself can coil and recoil thousands of times a second, one of the fastest cellular movements known."},
   {id:"stentor",name:"Stentor",latin:"Stentor",rarity:"legendary",icon:"trumpet",photo:"media/stentor.png",
    habitat:"Lurks among algae and detritus in nutrient-rich ponds. Sample near the bottom, especially where the water is slightly murky and green.",
-   indicator:"A stentor sighting means the pond has a mature, complex food web. It's near the top of the microbial food chain.",
+   indicator:"A sighting means the pond has a mature, complex food web. It's near the top of the microbial food chain.",
    id_hint:"Large enough to see as a faint blue-green speck with the naked eye. Under the scope: a trumpet shape that stretches and contracts. The whole body is covered in rows of cilia.",
    fact:"Stentor has no brain, no neurons, no nervous system of any kind, and yet it learns. Tap it repeatedly, and it stops flinching; it has decided the disturbance isn't worth reacting to. The memory is stored not in a synapse but in a chemical tag on a protein, using almost exactly the same molecular mechanism that human neurons use to form memories. When a Stentor divides, it passes the memory to both daughters. It is a single cell that can learn, remember, and teach."},
   {id:"mystery-1",name:"???",latin:"— unidentified —",rarity:"legendary",icon:"ciliate",photo:null,
@@ -586,6 +589,9 @@ function logIt(){
   const r=RAR[c.rarity], big=(c.rarity==="rare"||c.rarity==="legendary");
   toast(big?`★ ${r.t} find — ${c.name}!`:`${c.name} added to your log`);
   updateProgress(); setTimeout(()=>plate.classList.remove("revealing"),1400);
+}
+function restartLog(){
+  found={}; save(); renderGrid(); toast("Log cleared — start fresh.");
 }
 let tT;
 function toast(m){const el=$("toast");el.textContent=m;el.classList.add("show");clearTimeout(tT);tT=setTimeout(()=>el.classList.remove("show"),2600);}
